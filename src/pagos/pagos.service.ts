@@ -11,6 +11,13 @@ export class PagosService {
     return this.drizzleService.db;
   }
 
+  async obtenerReserva(idReserva: number) {
+    const reserva = await this.db.query.reservas.findFirst({
+      where: eq(schema.reservas.id, idReserva),
+    });
+    return reserva ?? null;
+  }
+
   /**
    * Crea un registro de pago inicial en estado pendiente antes de llamar a Mercado Pago.
    */

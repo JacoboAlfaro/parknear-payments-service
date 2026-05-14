@@ -7,11 +7,15 @@ import {
 	Param,
 	ParseIntPipe,
 	Post,
+	UseGuards,
 } from '@nestjs/common';
 import { PagosService } from './pagos.service';
 import { MercadopagoService } from '../mercadopago/mercadopago.service';
 import type { CrearPagoDto } from './dtos/crear-pago.dto';
 import type { CrearPagoResultado } from './dtos/pago-resultado.interface';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('pagos')
 export class PagosController {
@@ -20,22 +24,30 @@ export class PagosController {
 		private readonly mercadopagoService: MercadopagoService,
 	) {}
 
+	@UseGuards(JwtAuthGuard, RolesGuard)
+	@Roles('CONDUCTOR')
 	@Post()
 	async crearPago(@Body() body: CrearPagoDto): Promise<CrearPagoResultado> {
 		if (!body?.idReserva || !body?.datosPago?.token || !body?.datosPago?.payer?.email) {
 			throw new BadRequestException('Faltan campos obligatorios para crear el pago');
 		}
 
-		const monto = body.monto ?? body.datosPago.transaction_amount;
-		if (monto === undefined || monto === null) {
-			throw new BadRequestException('Debes enviar el monto del pago');
+		// Obtenemos el precio directamente desde la reserva en DB
+		const reserva = await this.pagosService.obtenerReserva(body.idReserva);
+		if (!reserva) {
+			throw new NotFoundException('Reserva no encontrada');
+		}
+		
+		const monto = Number(reserva.precio);
+		if (monto <= 0) {
+			throw new BadRequestException('El monto de la reserva no es válido para procesar el pago');
 		}
 
 		const pagoPendiente = await this.pagosService.crearPagoPendiente(body.idReserva, String(monto));
 
 		const respuestaMp = await this.mercadopagoService.procesarPago({
 			...body.datosPago,
-			transaction_amount: Number(monto),
+			transaction_amount: monto,
 		});
 
 		const pagoActualizado = await this.pagosService.actualizarPagoDesdeProcesamiento(
@@ -53,6 +65,8 @@ export class PagosController {
 		};
 	}
 
+	@UseGuards(JwtAuthGuard, RolesGuard)
+	@Roles('ADMIN', 'CONDUCTOR')
 	@Get(':idPago')
 	async obtenerPago(@Param('idPago', ParseIntPipe) idPago: number) {
 		const pago = await this.pagosService.obtenerPagoPorId(idPago);
@@ -63,6 +77,8 @@ export class PagosController {
 		return pago;
 	}
 
+	@UseGuards(JwtAuthGuard, RolesGuard)
+	@Roles('ADMIN', 'CONDUCTOR')
 	@Get('usuario/:idUsuario')
 	async obtenerPagosPorUsuario(@Param('idUsuario') idUsuario: string) {
 		return this.pagosService.obtenerPagosPorUsuario(idUsuario);
